@@ -1,0 +1,149 @@
+https://www.hackster.io/bees/aws-iot-and-beehives-c59fff
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+--
+-- create DynamoDB table
+--
+aws dynamodb create-table \
+	--table-name IOT-HiveData \
+	--attribute-definitions \
+			AttributeName=key,AttributeType=S \
+			AttributeName=timestamp,AttributeType=S  \
+	--key-schema \
+			AttributeName=key,KeyType=HASH \
+			AttributeName=timestamp,KeyType=RANGE \
+	--provisioned-throughput ReadCapacityUnits=1,WriteCapacityUnits=1
+
+	"TableArn": "arn:aws:dynamodb:us-west-2:123275298972:table/IOT-HiveData", 
+
+-- create role 
+cat > iot-hivedata-actions-role.txt
+{  
+  "Version":"2012-10-17",
+  "Statement":[  
+    {  
+      "Sid":"",
+      "Effect":"Allow",
+      "Principal":{  
+        "Service":"iot.amazonaws.com"
+      },
+      "Action":"sts:AssumeRole"
+    }
+  ]
+}
+
+aws iam create-role --role-name "iot-hivedata-actions-role" --assume-role-policy-document file://iot-hivedata-actions-role.txt
+	"Arn": "arn:aws:iam::123275298972:role/iot-hivedata-actions-role"
+
+-- create policy (for accessing dynamoDB)
+cat > iot-hivedata-ddb-insert-policy.txt
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "dynamodb:*"
+            ],
+            "Resource": [
+                "arn:aws:dynamodb:us-west-2:123275298972:table/IOT-HiveData"
+            ]
+        }
+    ]
+}
+
+aws iam create-policy --policy-name "iot-hivedata-ddb-insert-policy" --policy-document file://iot-hivedata-ddb-insert-policy.txt
+	        "Arn": "arn:aws:iam::123275298972:policy/iot-hivedata-ddb-insert-policy"
+
+-- attach policy to role
+aws iam attach-role-policy --role-name "iot-hivedata-actions-role" --policy-arn "arn:aws:iam::123275298972:policy/iot-hivedata-ddb-insert-policy"
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+--
+-- basic rule
+--
+cat > iot-hivedata-topic-ddb-insert-rule.txt
+{  
+  "sql":"SELECT * FROM 'topic/hivedata/temperature'",
+  "ruleDisabled":false,
+  "actions":[  
+    {  
+      "dynamoDB":{  
+        "tableName":"IOT-HiveData",
+        "hashKeyField":"key",
+        "hashKeyValue":"${clientId()}",
+        "rangeKeyField":"timestamp",
+        "rangeKeyValue":"${timestamp()}",
+        "roleArn":"arn:aws:iam::123275298972:role/iot-hivedata-actions-role"
+      }
+    }
+  ]
+}
+
+aws iot create-topic-rule --rule-name "iot_hivedata_topic_ddb_insert_rule" --topic-rule-payload  file://iot-hivedata-topic-ddb-insert-rule.txt
+
+-- debug rule
+cat > iot-logging-role.txt
+{  
+  "Version":"2012-10-17",
+  "Statement":[  
+    {  
+      "Sid":"",
+      "Effect":"Allow",
+      "Principal":{  
+        "Service":"iot.amazonaws.com"
+      },
+      "Action":"sts:AssumeRole"
+    }
+  ]
+}
+
+aws iam create-role --role-name "iot-logging-role" --assume-role-policy-document file://iot-logging-role.txt
+	"Arn": "arn:aws:iam::123275298972:role/iot-logging-role"
+
+cat > iot-logging-policy.txt
+{
+"Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+                "logs:PutMetricFilter",
+                "logs:PutRetentionPolicy",
+                "logs:GetLogEvents",
+                "logs:DeleteLogStream"
+            ],
+            "Resource": [
+                "*"
+            ]
+        }
+    ]
+} 
+
+aws iam create-policy --policy-name "iot-logging-policy" --policy-document file://iot-logging-policy.txt
+	"Arn": "arn:aws:iam::123275298972:policy/iot-logging-policy"
+
+aws iam attach-role-policy --role-name "iot-logging-role" --policy-arn "arn:aws:iam::123275298972:policy/iot-logging-policy"
+
+aws iot set-logging-options --logging-options-payload roleArn="arn:aws:iam::123275298972:role/iot-logging-role",logLevel="INFO"
+aws iot set-logging-options --logging-options-payload roleArn="arn:aws:iam::123275298972:role/iot-logging-role",logLevel="DISABLED"
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- test sending data through mosquitto client
+apt-get install mosquitto-clients
+
+mosquitto_pub \
+	--cafile ../ssl/root-CA.crt \
+	--cert ../ssl/cert.pem \
+	--key ../ssl/privkey.pem \
+	-h a1arqmop0meczp.iot.us-west-2.amazonaws.com \
+	-p 8883 -q 1 -d \
+	-t "topic/hivedata/temperature" \
+	-i beehive-1  \
+	-m "{\"InsideTemperature\": \"85.23\",  \"OutsideTemperature\": \"49.78\"}"
+
+
+
+

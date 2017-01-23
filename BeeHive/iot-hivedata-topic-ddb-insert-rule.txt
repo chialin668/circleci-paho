@@ -1,0 +1,16 @@
+{ 
+  "sql":"SELECT * FROM 'topic/hivedata/temperature'",
+  "ruleDisabled":false,
+  "actions":[
+    {
+      "dynamoDB":{
+        "tableName":"IOT-HiveData",
+        "hashKeyField":"key",
+        "hashKeyValue":"${clientId()}",
+        "rangeKeyField":"timestamp",
+        "rangeKeyValue":"${timestamp()}",
+        "roleArn":"arn:aws:iam::123275298972:role/iot-hivedata-actions-role"
+      }
+    }
+  ]
+}
